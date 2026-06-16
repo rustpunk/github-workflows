@@ -1,0 +1,48 @@
+name: Reusable PR branch updater
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Base branch to update PR branches against.
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-pr-branches:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Rebase open PR branches onto base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ inputs.base }}
+        run: |
+          set -u
+
+          prs="$(gh pr list \
+            --repo "$REPO" \
+            --state open \
+            --base "$BASE" \
+            --json number,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository == false) | .number')"
+
+          if [ -z "$prs" ]; then
+            echo "No same-repo open PRs targeting $BASE."
+            exit 0
+          fi
+
+          for pr in $prs; do
+            echo "Updating PR #$pr"
+            if gh pr update-branch "$pr" --repo "$REPO" --rebase; then
+              echo "- PR #$pr updated or already current" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- PR #$pr could not be updated automatically; likely conflict or permission issue" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
