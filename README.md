@@ -13,8 +13,13 @@ jobs:
     uses: rustpunk/github-workflows/.github/workflows/pr-auto-update-branches.yml@main
     with:
       base: main
+    secrets: inherit
 ```
 
 The updater rebases same-repository open PR branches onto the configured base
-branch when the caller workflow runs. Fork PRs are intentionally skipped because
-the default `GITHUB_TOKEN` cannot safely push to them.
+branch when the caller workflow runs. Fork PRs are intentionally skipped.
+
+By default the workflow pushes with `GITHUB_TOKEN`. To make update pushes trigger
+normal CI runs, configure a repository or organization secret named
+`PR_BRANCH_UPDATE_TOKEN` with a fine-grained PAT or GitHub App token that can read
+pull requests and write contents.

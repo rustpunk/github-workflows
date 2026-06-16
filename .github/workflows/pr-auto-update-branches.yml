@@ -8,6 +8,10 @@ on:
         required: false
         type: string
         default: main
+    secrets:
+      PR_BRANCH_UPDATE_TOKEN:
+        description: Optional PAT or GitHub App token used for pushes that should trigger normal CI.
+        required: false
 
 permissions:
   contents: write
@@ -18,31 +22,63 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PR_BRANCH_UPDATE_TOKEN || github.token }}
+
       - name: Rebase open PR branches onto base
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PR_BRANCH_UPDATE_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           BASE: ${{ inputs.base }}
         run: |
           set -u
 
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+
           prs="$(gh pr list \
             --repo "$REPO" \
             --state open \
             --base "$BASE" \
-            --json number,isCrossRepository \
-            --jq '.[] | select(.isCrossRepository == false) | .number')"
+            --json number,headRefName,headRefOid,isCrossRepository \
+            --jq '.[] | select(.isCrossRepository == false) | @base64')"
 
           if [ -z "$prs" ]; then
             echo "No same-repo open PRs targeting $BASE."
             exit 0
           fi
 
-          for pr in $prs; do
-            echo "Updating PR #$pr"
-            if gh pr update-branch "$pr" --repo "$REPO" --rebase; then
-              echo "- PR #$pr updated or already current" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "- PR #$pr could not be updated automatically; likely conflict or permission issue" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r row; do
+            pr_json="$(printf '%s' "$row" | base64 -d)"
+            pr="$(printf '%s' "$pr_json" | jq -r '.number')"
+            head="$(printf '%s' "$pr_json" | jq -r '.headRefName')"
+            head_oid="$(printf '%s' "$pr_json" | jq -r '.headRefOid')"
+
+            echo "Updating PR #$pr ($head)"
+            if ! git fetch --no-tags origin "+refs/heads/${head}:refs/remotes/origin/${head}"; then
+              echo "- PR #$pr could not be fetched; branch may have been deleted" >> "$GITHUB_STEP_SUMMARY"
+              continue
             fi
-          done
+
+            if git merge-base --is-ancestor "refs/remotes/origin/${BASE}" "refs/remotes/origin/${head}"; then
+              echo "- PR #$pr already contains ${BASE}" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            git checkout -B "pr-update-${pr}" "refs/remotes/origin/${head}"
+
+            if git rebase "refs/remotes/origin/${BASE}"; then
+              if git push --force-with-lease="refs/heads/${head}:${head_oid}" origin "HEAD:refs/heads/${head}"; then
+                echo "- PR #$pr rebased onto ${BASE}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "- PR #$pr rebase succeeded but push was rejected; branch changed during update" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            else
+              git rebase --abort || true
+              echo "- PR #$pr could not be rebased automatically; likely conflict" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done <<< "$prs"
