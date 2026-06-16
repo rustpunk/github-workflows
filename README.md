@@ -13,7 +13,8 @@ jobs:
     uses: rustpunk/github-workflows/.github/workflows/pr-auto-update-branches.yml@main
     with:
       base: main
-    secrets: inherit
+    secrets:
+      PR_BRANCH_UPDATE_TOKEN: ${{ secrets.PR_BRANCH_UPDATE_TOKEN }}
 ```
 
 The updater rebases same-repository open PR branches onto the configured base
