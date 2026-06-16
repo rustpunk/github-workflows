@@ -1,4 +1,4 @@
-# rustpunk agent workflows
+# rustpunk github workflows
 
 Reusable GitHub Actions workflows for rustpunk repositories.
 
@@ -10,7 +10,7 @@ the implementation to this repository:
 ```yaml
 jobs:
   update:
-    uses: rustpunk/agent-workflows/.github/workflows/pr-auto-update-branches.yml@main
+    uses: rustpunk/github-workflows/.github/workflows/pr-auto-update-branches.yml@main
     with:
       base: main
 ```
